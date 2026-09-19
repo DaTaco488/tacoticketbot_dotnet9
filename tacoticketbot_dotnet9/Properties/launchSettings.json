@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "tacoticketbot_dotnet9": {
+      "commandName": "Project",
+      "workingDirectory": "C:\\Users\\DaTaco"
+    }
+  }
+}
