@@ -39,6 +39,8 @@
             // button1
             // 
             button1.BackColor = Color.PaleGreen;
+            button1.Cursor = Cursors.Hand;
+            button1.FlatStyle = FlatStyle.Popup;
             button1.Font = new Font("NSimSun", 26.25F, FontStyle.Bold, GraphicsUnit.Point, 0);
             button1.Location = new Point(7, 15);
             button1.Name = "button1";
@@ -51,6 +53,8 @@
             // button2
             // 
             button2.BackColor = Color.FromArgb(192, 192, 255);
+            button2.Cursor = Cursors.Hand;
+            button2.FlatStyle = FlatStyle.Flat;
             button2.Location = new Point(227, 15);
             button2.Name = "button2";
             button2.Size = new Size(210, 66);
@@ -62,6 +66,8 @@
             // button3
             // 
             button3.BackColor = Color.Red;
+            button3.Cursor = Cursors.Hand;
+            button3.FlatStyle = FlatStyle.Flat;
             button3.Location = new Point(227, 82);
             button3.Name = "button3";
             button3.Size = new Size(210, 71);
@@ -72,6 +78,7 @@
             // 
             // richTextBox1
             // 
+            richTextBox1.Cursor = Cursors.IBeam;
             richTextBox1.Location = new Point(12, 12);
             richTextBox1.Name = "richTextBox1";
             richTextBox1.Size = new Size(600, 267);
@@ -98,6 +105,7 @@
             Controls.Add(richTextBox1);
             Name = "Form1";
             Text = "Form1";
+            FormClosing += Form1_FormClosing;
             groupBox1.ResumeLayout(false);
             ResumeLayout(false);
         }

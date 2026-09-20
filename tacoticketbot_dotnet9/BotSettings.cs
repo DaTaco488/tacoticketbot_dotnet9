@@ -10,5 +10,6 @@ namespace tacoticketbot_dotnet9
     {
         public string Token { get; set; } = "";
         public ulong guildId { get; set; } = 0;
+        public ulong catId { get; set; } = 0;
     }
 }
