@@ -28,12 +28,15 @@
         /// </summary>
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             button1 = new Button();
             button2 = new Button();
             button3 = new Button();
             richTextBox1 = new RichTextBox();
             groupBox1 = new GroupBox();
+            pictureBox1 = new PictureBox();
             groupBox1.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)pictureBox1).BeginInit();
             SuspendLayout();
             // 
             // button1
@@ -96,6 +99,9 @@
             groupBox1.TabIndex = 5;
             groupBox1.TabStop = false;
             // 
+            // pictureBox1
+            // 
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -107,6 +113,7 @@
             Text = "Form1";
             FormClosing += Form1_FormClosing;
             groupBox1.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)pictureBox1).EndInit();
             ResumeLayout(false);
         }
 
@@ -116,5 +123,6 @@
         private Button button3;
         private RichTextBox richTextBox1;
         private GroupBox groupBox1;
+        private PictureBox pictureBox1;
     }
 }
