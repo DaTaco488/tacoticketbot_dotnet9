@@ -3,6 +3,7 @@ using Discord.Net;
 using Discord.WebSocket;
 using Microsoft.VisualBasic.ApplicationServices;
 using Newtonsoft.Json;
+using System.Net.Sockets;
 using System.Threading;
 
 namespace tacoticketbot_dotnet9
@@ -14,6 +15,9 @@ namespace tacoticketbot_dotnet9
         private readonly SynchronizationContext _uiContext;
         private bool callbacksAssigned = false;
         private bool loggyinny = false;
+        private bool isPaused = false;
+
+        private Dictionary<ulong, SocketSlashCommand> openMessages = new Dictionary<ulong, SocketSlashCommand>();
 
         public Form1()
         {
@@ -89,6 +93,19 @@ namespace tacoticketbot_dotnet9
         private void button2_Click(object sender, EventArgs e)
         {
             //pause button pressed
+            if (isPaused)
+            {
+                isPaused = false;
+                button2.Text = "PAUSE";
+                Log("Bot resumed.");
+            }
+            else
+            {
+                isPaused = true;
+                button2.Text = "RESUME";
+                Log("Bot paused.");
+            }
+
         }
 
         private void button3_Click(object sender, EventArgs e)
@@ -119,12 +136,20 @@ namespace tacoticketbot_dotnet9
             removeTicket.WithName("remove_ticket");
             removeTicket.WithDescription("Remove a support ticket");
 
+            // Database List Command
+            var databaseList = new SlashCommandBuilder();
+            databaseList.WithName("database_list");
+            databaseList.WithDescription("List the current tickets and their properties");
+            databaseList.WithDefaultMemberPermissions(GuildPermission.Administrator); // Only allow admins to use this command
+
             try
             {
                 //register slash commands to the discord server
                 await guild.CreateApplicationCommandAsync(ticketCreate.Build());
 
                 await guild.CreateApplicationCommandAsync(removeTicket.Build());
+
+                await guild.CreateApplicationCommandAsync(databaseList.Build());
             }
             catch (HttpException exception)
             {
@@ -138,15 +163,56 @@ namespace tacoticketbot_dotnet9
 
         private async Task SlashCommandHandler(SocketSlashCommand command)
         {
+            if (isPaused)
+            {
+                await command.RespondAsync("The bot is currently paused. Please try again later.", ephemeral: true);
+                return;
+            }
             // Let's add a switch statement for the command name so we can handle multiple commands in one event.
             switch (command.Data.Name)
             {
                 case "ticket":
                     await HandleTicketCommand(command);
                     break;
-                    //case "remove_ticket":
-                    //    await HandleRemoveTicketCommand(command);
-                    //    break;
+                //case "remove_ticket":
+                //    await HandleRemoveTicketCommand(command);
+                //    break;
+                case "database_list":
+                    await HandleDatabaseListCommand(command);
+                    break;
+            }
+        }
+
+        private async Task HandleDatabaseListCommand(SocketSlashCommand command)
+        {
+            // 1. Cast the user to a SocketGuildUser to get server-specific data
+            if (command.User is SocketGuildUser guildUser)
+            {
+                // 2. Check for a specific permission (e.g., Administrator)
+                if (guildUser.GuildPermissions.Administrator)
+                {
+                    string response = "";
+                    if (_settings.createdTickets.Count == 0)
+                    {
+                        response = "No tickets have been created yet.";
+                    }
+                    else
+                    {
+                        foreach (var ticket in _settings.createdTickets)
+                        {
+                            response += $"User Name: {ticket.userName}, User ID: {ticket.userId}, Channel Name: {ticket.channelName}, Category: {ticket.category} Ticket ID: {ticket.ticketId},  Channel ID: {ticket.channelId}\n";
+                        }
+                    }
+                    await command.RespondAsync(response, ephemeral: true);
+                }
+                else
+                {
+                    await command.RespondAsync("You dont have permission to run this command.");
+                }
+            }
+            else
+            {
+                await command.RespondAsync("You dont have permission to run this command.");
             }
         }
 
@@ -184,8 +250,12 @@ namespace tacoticketbot_dotnet9
                 "• Open Giveaway Claim ticket when claiming a giveaway but be ready with proof and check the giveaway time before claiming!\n" +
                 "• Open Building Service ticket when trying to buy a farm or a build!\n" +
                 "• Open Middleman Service ticket when trying to trade something with a user but your not sure of trusting them!",
-                components: componentBuilder.Build()
+                components: componentBuilder.Build(),
+                ephemeral: true
             );
+
+            // 5. Store the command for later reference if needed (e.g., to update the message later)
+            openMessages[command.User.Id] = command;
         }
 
         private async Task SelectMenuHandler(SocketMessageComponent command)
@@ -238,9 +308,21 @@ namespace tacoticketbot_dotnet9
                 .Build();
 
             // Update the existing message with the new green button state
-            await command.RespondAsync("", components: components);
+            SocketSlashCommand originalCommand = openMessages[command.User.Id];
+            if (originalCommand != null)
+            {
+                await originalCommand.ModifyOriginalResponseAsync(msg =>
+                {
+                    msg.Components = components;
+                });
+                await command.DeferAsync();
+            }
+            else
+            {
+                await command.RespondAsync("", components: components, ephemeral: true);
+            }
         }
-        
+
         private async Task ButtonHandler(SocketMessageComponent command)
         {
             if (command.Data.CustomId.StartsWith("create_ticket_"))
@@ -265,14 +347,48 @@ namespace tacoticketbot_dotnet9
                     )
                 };
 
-                // 2. Create the channel with the defined permissions
-                string channelName = $"{command.User.Username} for {selectedCategory.Replace("category_", "").Replace("_", " ")}";
+                // 2. Create the channel with the defined permissions \u2800
+                ulong ticketNum = _settings.ticketNum++;
+                string channelName = $"ticket{ticketNum}⋅{command.User.Username}s⋅{selectedCategory.Replace("category_", "").Replace("_", "⋅")}⋅ticket";
                 var newChannel = await guild.CreateTextChannelAsync(channelName, tcp =>
                 {
                     tcp.CategoryId = _settings.catId;
                     tcp.PermissionOverwrites = permissions;
                 });
-                await command.RespondAsync($"Ticket created for category: {selectedCategory.Replace("category_", "").Replace("_", " ")}");
+
+                string category = selectedCategory.Replace("category_", "").Replace("_", " ");
+
+                // Remember to add the ticket to the list of created tickets
+                _settings.createdTickets.Add(new CreatedTicket
+                {
+                    userId = command.User.Id,
+                    userName = command.User.Username,
+                    channelId = newChannel.Id,
+                    channelName = newChannel.Name,
+                    category = category,
+                    ticketId = ticketNum
+                });
+                AppSettings.Save(_settings);
+
+                
+                await newChannel.SendMessageAsync($"Hello {command.User.Mention}, this is your ticket for **{category}**. Please describe your issue or request, and a staff member will assist you shortly.\nUse /remove_ticket {ticketNum} to close/delete this ticket.");
+
+                // Update the existing message with the new green button state
+                SocketSlashCommand originalCommand = openMessages[command.User.Id];
+                if (originalCommand != null)
+                {
+                    await originalCommand.ModifyOriginalResponseAsync(msg =>
+                    {
+                        msg.Content = $"Ticket created for category: {category}";
+                        msg.Components = new ComponentBuilder().Build(); // Remove components after ticket creation
+                    });
+                    await command.DeferAsync();
+                    openMessages.Remove(command.User.Id); // Remove it from the dictionary after updating
+                }
+                else
+                {
+                    await command.RespondAsync($"Ticket created for category: {category}", ephemeral: true);
+                }
             }
         }
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
