@@ -11,7 +11,7 @@ namespace tacoticketbot_dotnet9
         public string Token { get; set; } = "";
         public ulong guildId { get; set; } = 0;
         public ulong catId { get; set; } = 0;
-        public ulong ticketNum { get; set; } = 1;
+        public Int64 ticketNum { get; set; } = 1;
         public List<CreatedTicket> createdTickets { get; set; } = new List<CreatedTicket>();
     }
 
@@ -22,6 +22,6 @@ namespace tacoticketbot_dotnet9
         public ulong channelId { get; set; } = 0;
         public string channelName { get; set; } = "";
         public string category { get; set; } = "";
-        public ulong ticketId { get; set; } = 1;
+        public Int64 ticketId { get; set; } = 1;
     }
 }

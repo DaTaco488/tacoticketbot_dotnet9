@@ -4,6 +4,7 @@ using Discord.WebSocket;
 using Microsoft.VisualBasic.ApplicationServices;
 using Newtonsoft.Json;
 using System.Net.Sockets;
+using System.Reflection.Emit;
 using System.Threading;
 
 namespace tacoticketbot_dotnet9
@@ -135,6 +136,7 @@ namespace tacoticketbot_dotnet9
             var removeTicket = new SlashCommandBuilder();
             removeTicket.WithName("remove_ticket");
             removeTicket.WithDescription("Remove a support ticket");
+            removeTicket.AddOption("ticket_number", ApplicationCommandOptionType.Integer, "The ticket number to remove", isRequired: false);
 
             // Database List Command
             var databaseList = new SlashCommandBuilder();
@@ -174,9 +176,9 @@ namespace tacoticketbot_dotnet9
                 case "ticket":
                     await HandleTicketCommand(command);
                     break;
-                //case "remove_ticket":
-                //    await HandleRemoveTicketCommand(command);
-                //    break;
+                case "remove_ticket":
+                    await HandleRemoveTicketCommand(command);
+                    break;
                 case "database_list":
                     await HandleDatabaseListCommand(command);
                     break;
@@ -203,7 +205,26 @@ namespace tacoticketbot_dotnet9
                             response += $"User Name: {ticket.userName}, User ID: {ticket.userId}, Channel Name: {ticket.channelName}, Category: {ticket.category} Ticket ID: {ticket.ticketId},  Channel ID: {ticket.channelId}\n";
                         }
                     }
-                    await command.RespondAsync(response, ephemeral: true);
+                    if (response.Length < 2000) {
+                        await command.RespondAsync(response, ephemeral: true);
+                    }
+                    else
+                    {
+                        await command.RespondAsync("The ticket list is too long to display here, so I've sent it to you in DMs.", ephemeral: true);
+                        string[] text = response.Split('\n');
+                        string msg = "";
+                        foreach (string line in text)
+                        {
+                            msg += line+"\n";
+                            if (msg.Length > 1000)
+                            {
+                                await command.User.SendMessageAsync(msg);
+                                msg = "";
+                            }
+                            
+                        }
+                        
+                    }
                 }
                 else
                 {
@@ -223,7 +244,7 @@ namespace tacoticketbot_dotnet9
                 .WithCustomId("ticket_category_select")
                 .WithPlaceholder("Select a category")
                 .AddOption("Support", "category_support", "Open Support ticket when needed support!")
-                .AddOption("Buy Spawners", "category_spawners", "Open Buy Spawners ticket when buying any spawners!")
+                .AddOption("Buy Spawners", "category_buy_spawners", "Open Buy Spawners ticket when buying any spawners!")
                 .AddOption("Sell Spawners", "category_sell_spawners", "Open Sell Spawners ticket when selling any spawners!")
                 .AddOption("Giveaway Claim", "category_giveaway", "Open Giveaway Claim ticket when claiming a giveaway!")
                 .AddOption("Building Service", "category_building", "Open Building Service ticket when trying to buy a farm or build!")
@@ -258,24 +279,132 @@ namespace tacoticketbot_dotnet9
             openMessages[command.User.Id] = command;
         }
 
+        private async Task HandleRemoveTicketCommand(SocketSlashCommand command)
+        {
+            // Check if the user provided a ticket number
+            if (command.Data.Options.Count == 0 || command.Data.Options.First().Type != ApplicationCommandOptionType.Integer)
+            {
+                //await command.RespondAsync("Please provide a valid ticket number.", ephemeral: true);
+                SendRemoveTicketComboBox(command);
+                return;
+            }
+            Int64 ticketNumber = (Int64)command.Data.Options.First().Value;
+            // Find the ticket in the created tickets list
+            CreatedTicket? ticketToRemove = _settings.createdTickets.FirstOrDefault(t => t.ticketId == ticketNumber);
+            if (ticketToRemove == null)
+            {
+                await command.RespondAsync($"No ticket found with number {ticketNumber}.", ephemeral: true);
+                return;
+            }
+            // Get the guild and channel
+            var guild = _client.GetGuild(_settings.guildId);
+            if (command.User.Id != ticketToRemove.userId && !((SocketGuildUser)command.User).GuildPermissions.Administrator)
+            {
+                await command.RespondAsync("You do not have permission to remove this ticket.", ephemeral: true);
+                return;
+            }
+
+            await RemoveTicket(ticketNumber, guild);
+            await command.RespondAsync($"Ticket number {ticketNumber} has been removed.", ephemeral: true);
+        }
+
+        private async Task RemoveTicket(long ticketNumber, SocketGuild guild)
+        {
+            CreatedTicket? ticketToRemove = _settings.createdTickets.FirstOrDefault(t => t.ticketId == ticketNumber);
+            if (ticketToRemove == null)
+            {
+                Log($"No ticket found with number {ticketNumber}.");
+                return;
+            }
+            var channel = guild.GetTextChannel(ticketToRemove.channelId);
+            if (channel != null)
+            {
+                // Delete the channel
+                await channel.DeleteAsync();
+                Log($"Deleted channel: {ticketToRemove.channelName} for user: {ticketToRemove.userName}");
+            }
+            else
+            {
+                Log($"Channel not found for ticket number {ticketNumber}.");
+            }
+            // Remove the ticket from the list and save settings
+            _settings.createdTickets.Remove(ticketToRemove);
+            AppSettings.Save(_settings);
+        }
+
+        private async void SendRemoveTicketComboBox(SocketSlashCommand command)
+        {
+            // 1. Build the Select Menu with your ticket categories
+            var menuBuilder = new SelectMenuBuilder()
+                .WithCustomId("ticket_remove_select")
+                .WithPlaceholder("Select a ticket to close/remove");
+            ulong userId = command.User.Id;
+            bool foundTickets = false;
+            if (command.User is SocketGuildUser guildUser && guildUser.GuildPermissions.Administrator)
+            {
+                // Admins can see all tickets
+                foreach (var ticket in _settings.createdTickets)
+                {
+                    menuBuilder.AddOption($"Ticket {ticket.ticketId} - {ticket.userName} - {ticket.category}", $"remove_ticket_{ticket.ticketId}");
+                    foundTickets = true;
+                }
+
+            }
+            else
+            {
+                // Regular users can only see their own tickets
+                foreach (var ticket in _settings.createdTickets.Where(t => t.userId == userId))
+                {
+                    menuBuilder.AddOption($"Ticket {ticket.ticketId} - {ticket.category}", $"remove_ticket_{ticket.ticketId}");
+                    foundTickets = true;
+                }
+            }
+            if (!foundTickets)
+            {
+                await command.RespondAsync("You have no tickets to remove.", ephemeral: true);
+                return;
+            }
+
+            // 2. Build the "Create Ticket" Button (Initially Disabled & Grey/Secondary until a choice is made)
+            var buttonBuilder = new ButtonBuilder()
+                .WithCustomId("remove_ticket_btn")
+                .WithLabel("Remove Ticket")
+                .WithStyle(ButtonStyle.Secondary)
+                .WithDisabled(true); // Starts disabled until selection happens
+
+            // 3. Combine them into a ComponentBuilder
+            var componentBuilder = new ComponentBuilder()
+                .WithSelectMenu(menuBuilder)
+                .WithButton(buttonBuilder);
+
+            // 4. Send the message containing the embed/text and components
+            await command.RespondAsync(
+                "**Choose a ticket to remove **\n",
+                components: componentBuilder.Build(),
+                ephemeral: true
+                );
+
+            // 5. Store the command for later reference if needed (e.g., to update the message later)
+            openMessages[command.User.Id] = command;
+        }
+
         private async Task SelectMenuHandler(SocketMessageComponent command)
         {
             // Let's add a switch statement for the command name so we can handle multiple commands in one event.
             switch (command.Data.CustomId)
             {
                 case "ticket_category_select":
-                    await HandleSelectMenuAsync(command);
+                    await HandleCreateSelectMenuAsync(command);
                     break;
-                    //case "remove_ticket":
-                    //    await HandleRemoveTicketCommand(command);
-                    //    break;
+                case "ticket_remove_select":
+                    await HandleRemoveSelectMenuAsync(command);
+                    break;
             }
         }
 
-        private async Task HandleSelectMenuAsync(SocketMessageComponent command)
+        private async Task HandleCreateSelectMenuAsync(SocketMessageComponent command)
         {
-            var selectedCategory = command.Data.Values.FirstOrDefault();
-
+            var selectedCategory = command.Data.Values.FirstOrDefault();            
             // Re-enable the components, but turn the button Green (Success) and store the selected category 
             // (You can store the chosen category temporarily using user-specific state or prefixing the button's custom ID, e.g., `create_ticket_{selectedCategory}`)
 
@@ -289,7 +418,7 @@ namespace tacoticketbot_dotnet9
                 .WithPlaceholder(msg)
                 // Re-add options here...
                 .AddOption("Support", "category_support", "Open Support ticket when needed support!")
-                .AddOption("Buy Spawners", "category_spawners", "Open Buy Spawners ticket when buying any spawners!")
+                .AddOption("Buy Spawners", "category_buy_spawners", "Open Buy Spawners ticket when buying any spawners!")
                 .AddOption("Sell Spawners", "category_sell_spawners", "Open Sell Spawners ticket when selling any spawners!")
                 .AddOption("Giveaway Claim", "category_giveaway", "Open Giveaway Claim ticket when claiming a giveaway!")
                 .AddOption("Building Service", "category_building", "Open Building Service ticket when trying to buy a farm or build!")
@@ -323,8 +452,78 @@ namespace tacoticketbot_dotnet9
             }
         }
 
+        private async Task HandleRemoveSelectMenuAsync(SocketMessageComponent command)
+        {
+            var selectedCategory = command.Data.Values.FirstOrDefault();
+
+
+            // Re-enable the components, but turn the button Green (Success) and store the selected category 
+            // (You can store the chosen category temporarily using user-specific state or prefixing the button's custom ID, e.g., `create_ticket_{selectedCategory}`)
+
+            string msg = $"Selected: Ticket #{selectedCategory.Replace("remove_ticket_", "")}";
+            // 1. Build the Select Menu with your ticket categories
+            var menuBuilder = new SelectMenuBuilder()
+                .WithCustomId("ticket_remove_select")
+                .WithPlaceholder(msg);
+            ulong userId = command.User.Id;
+            if (command.User is SocketGuildUser guildUser && guildUser.GuildPermissions.Administrator)
+            {
+                // Admins can see all tickets
+                foreach (var ticket in _settings.createdTickets)
+                {
+                    menuBuilder.AddOption($"Ticket {ticket.ticketId} - {ticket.userName} - {ticket.category}", $"remove_ticket_{ticket.ticketId}");
+                }
+
+            }
+            else
+            {
+                // Regular users can only see their own tickets
+                foreach (var ticket in _settings.createdTickets.Where(t => t.userId == userId))
+                {
+                    menuBuilder.AddOption($"Ticket {ticket.ticketId} - {ticket.category}", $"remove_ticket_{ticket.ticketId}");
+                }
+            }
+            // 2. Update the "Remove Ticket" Button to be Red (Danger) and enabled
+            var buttonBuilder = new ButtonBuilder()
+                .WithCustomId($"remove_ticket_{selectedCategory}") // Passes the chosen category to the button action
+                .WithLabel("Remove Ticket")
+                .WithStyle(ButtonStyle.Danger)
+                .WithDisabled(false); // Enabled once a selection is made
+
+            // 3. Combine them into a ComponentBuilder
+            var componentBuilder = new ComponentBuilder()
+                .WithSelectMenu(menuBuilder)
+                .WithButton(buttonBuilder);
+
+            // Update the existing message with the new green button state
+            SocketSlashCommand originalCommand = openMessages[command.User.Id];
+            if (originalCommand != null)
+            {
+                await originalCommand.ModifyOriginalResponseAsync(msg =>
+                {
+                    msg.Components = componentBuilder.Build();
+                });
+                await command.DeferAsync();
+            }
+            else
+            {
+                await command.RespondAsync("", components: componentBuilder.Build(), ephemeral: true);
+            }
+        }
+
         private async Task ButtonHandler(SocketMessageComponent command)
         {
+            switch (command.Data.CustomId)
+            {
+                case var id when id.StartsWith("create_ticket_"):
+                    await HandleCreateTicketButtonAsync(command);
+                    break;
+                case var id when id.StartsWith("remove_ticket_"):
+                    await HandleRemoveTicketButtonAsync(command);
+                    break;
+            }
+        }
+        private async Task HandleCreateTicketButtonAsync(SocketMessageComponent command) {
             if (command.Data.CustomId.StartsWith("create_ticket_"))
             {
                 var selectedCategory = command.Data.CustomId.Replace("create_ticket_", "");
@@ -348,8 +547,8 @@ namespace tacoticketbot_dotnet9
                 };
 
                 // 2. Create the channel with the defined permissions \u2800
-                ulong ticketNum = _settings.ticketNum++;
-                string channelName = $"ticket{ticketNum}⋅{command.User.Username}s⋅{selectedCategory.Replace("category_", "").Replace("_", "⋅")}⋅ticket";
+                Int64 ticketNum = _settings.ticketNum++;
+                string channelName = $"ticket{ticketNum}⋅{command.User.GlobalName}s⋅{selectedCategory.Replace("category_", "").Replace("_", "⋅")}⋅ticket";
                 var newChannel = await guild.CreateTextChannelAsync(channelName, tcp =>
                 {
                     tcp.CategoryId = _settings.catId;
@@ -362,7 +561,7 @@ namespace tacoticketbot_dotnet9
                 _settings.createdTickets.Add(new CreatedTicket
                 {
                     userId = command.User.Id,
-                    userName = command.User.Username,
+                    userName = command.User.GlobalName,
                     channelId = newChannel.Id,
                     channelName = newChannel.Name,
                     category = category,
@@ -391,6 +590,39 @@ namespace tacoticketbot_dotnet9
                 }
             }
         }
+
+        private async Task HandleRemoveTicketButtonAsync(SocketMessageComponent command)
+        {
+            if (command.Data.CustomId.StartsWith("remove_ticket_"))
+            {
+                var selectedCategory = command.Data.CustomId.Replace("remove_ticket_", "");
+                // Handle ticket deletion logic here based on the selected category
+                var guild = _client.GetGuild(_settings.guildId);
+                Int64 ticketNumber = Int64.TryParse(selectedCategory, out var num) ? num : -1;
+                if (ticketNumber <= 0)
+                {
+                    await command.RespondAsync("Invalid ticket number.", ephemeral: true);
+                    return;
+                }
+                await RemoveTicket(ticketNumber, guild);
+                SocketSlashCommand originalCommand = openMessages[command.User.Id];
+                if (originalCommand != null)
+                {
+                    await originalCommand.ModifyOriginalResponseAsync(msg =>
+                    {
+                        msg.Content = $"Removed ticket: #{ticketNumber}";
+                        msg.Components = new ComponentBuilder().Build(); // Remove components after ticket creation
+                    });
+                    await command.DeferAsync();
+                    openMessages.Remove(command.User.Id); // Remove it from the dictionary after updating
+                }
+                else
+                {
+                    await command.RespondAsync($"Removed ticket: #{ticketNumber}", ephemeral: true);
+                }
+            }
+        }
+
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (loggyinny == true)
