@@ -13,6 +13,7 @@ namespace tacoticketbot_dotnet9
         public ulong catId { get; set; } = 0;
         public Int64 ticketNum { get; set; } = 1;
         public List<CreatedTicket> createdTickets { get; set; } = new List<CreatedTicket>();
+        public ulong transcriptChannelID { get; set; } = 0;
     }
 
     public class CreatedTicket
@@ -23,5 +24,6 @@ namespace tacoticketbot_dotnet9
         public string channelName { get; set; } = "";
         public string category { get; set; } = "";
         public Int64 ticketId { get; set; } = 1;
+        public DateTime createdAt { get; set; } = DateTime.Now;
     }
 }
